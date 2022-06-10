@@ -2,9 +2,11 @@ package species
 
 import (
 	"database/sql"
-	"errors"
+
 	"fmt"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 var debug = true
@@ -37,10 +39,10 @@ type DB struct {
 func NewDB(driverName, dataSourceName string) (*DB, error) {
 	db, err := sql.Open(driverName, dataSourceName)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithMessage(err, "Open db err")
 	}
 	if err = db.Ping(); err != nil {
-		return nil, err
+		return nil, errors.WithMessage(err, "Ping db error")
 	}
 	return &DB{
 		db: db,
@@ -58,7 +60,7 @@ func (db *DB) HasTable(table string) (bool, error) {
 	row := 0
 	err := db.db.QueryRow(sqlStr, table).Scan(&row)
 	if err != nil {
-		return false, err
+		return false, errors.WithMessage(err, "QueryRow err"+sqlStr+table)
 	}
 	if row == 0 {
 		return false, nil
@@ -86,7 +88,7 @@ func (db *DB) CreateTable(t Table) error {
 	}
 	_, err := db.db.Exec(sqlStr)
 	if err != nil {
-		return err
+		return errors.WithMessage(err, sqlStr)
 	}
 	return nil
 }
@@ -101,7 +103,6 @@ func (db *DB) BatchInsert(t Table, rows [][]interface{}) (sql.Result, error) {
 
 		values = append(values, row...)
 	}
-	fmt.Println(values)
 
 	sqlStr := fmt.Sprintf("INSERT INTO %s VALUES %s", t.Name, rowsStr[:len(rowsStr)-2])
 
@@ -109,7 +110,7 @@ func (db *DB) BatchInsert(t Table, rows [][]interface{}) (sql.Result, error) {
 	result, err := tx.Exec(sqlStr, values...)
 	if err != nil {
 		tx.Rollback()
-		return nil, err
+		return nil, errors.WithMessage(err, sqlStr)
 	}
 	err = tx.Commit()
 	if err != nil {
