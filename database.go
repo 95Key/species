@@ -2,6 +2,7 @@ package species
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 
 	"fmt"
@@ -71,6 +72,16 @@ func (t Table) GetColNameListSafe() []string {
 	return ret
 }
 
+func (t Table) GetColumnByName(colName string) (Column, error) {
+
+	for _, col := range t.Columns {
+		if col.Name == colName {
+			return col, nil
+		}
+	}
+	return Column{}, errors.WithStack(errors.New(colName + " 字段不存在"))
+}
+
 // 创建数据库表
 func (db *DB) CreateTable(t Table) error {
 	if has, _ := db.HasTable(t.Name); has {
@@ -99,6 +110,22 @@ func batchInsertSQL(t Table, rows [][]interface{}) string {
 
 }
 
+type batchInsertErr struct {
+	sqlStr string
+	values []interface{}
+	err    error
+}
+
+func (e batchInsertErr) Error() string {
+
+	str := fmt.Sprintln(e.sqlStr)
+	jsonData, _ := json.Marshal(e.values)
+	str += fmt.Sprintln(string(jsonData))
+	str += fmt.Sprintln(e.err)
+
+	return str
+}
+
 func (db *DB) batchInsert(t Table, df DataFile, rows [][]interface{}) (sql.Result, error) {
 	fmt.Println("	batchInsert 小批次插入", t.Name, len(rows))
 	tx, err := db.db.Begin()
@@ -118,8 +145,14 @@ func (db *DB) batchInsert(t Table, df DataFile, rows [][]interface{}) (sql.Resul
 	result, err := tx.Exec(sqlStr, values...)
 	if err != nil {
 		tx.Rollback()
-		fmt.Println("insert values", values, len(values))
-		return nil, errors.WithMessage(err, sqlStr)
+
+		e := batchInsertErr{
+			sqlStr: sqlStr,
+			values: values,
+			err:    err,
+		}
+
+		return nil, errors.WithMessage(e, sqlStr)
 	}
 	err = tx.Commit()
 	if err != nil {
@@ -158,7 +191,7 @@ func (db *DB) BatchInsertSheet(sheetName string, df DataFile) error {
 	for _, s := range split {
 		_, err := db.batchInsert(t, df, stringArrArrToInterfaceArrArr(s))
 		if err != nil {
-			return err
+			return errors.Wrap(err, "db.batchInser")
 		}
 	}
 
@@ -188,6 +221,20 @@ func SplitRows(rows [][]string, size int) [][][]string {
 			ret[i] = rows
 		}
 
+	}
+	return ret
+}
+
+// 重命名 将表格中sheet名称 替换为map中的名称,如果没有明确配置则用原名称处理
+func Replace(list []string, replaceList map[string]string) []string {
+	ret := []string{}
+	for _, item := range list {
+		v, has := replaceList[item]
+		if has {
+			ret = append(ret, v)
+		} else {
+			ret = append(ret, item)
+		}
 	}
 	return ret
 }
